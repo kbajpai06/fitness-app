@@ -7,6 +7,9 @@ from app.db.base import get_db
 from app.models.user import User
 from app.models.workout import Exercise, WorkoutPlan, WorkoutSession, SessionExercise, MuscleGroup
 from app.api.auth import get_current_user
+import httpx
+from app.config import settings
+from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/workout", tags=["Workout"])
 
@@ -211,3 +214,72 @@ def get_active_plan(
         "week_number": plan.week_number,
         "sessions": sessions
     }
+
+
+@router.get("/exercise-gif/{exercise_name}")
+async def get_exercise_gif(exercise_name: str):
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(
+                "https://oss.exercisedb.dev/api/v1/exercises",
+                params={"name": exercise_name.lower(), "limit": 10},
+                timeout=10.0,
+            )
+            if res.status_code == 200:
+                body      = res.json()
+                exercises = body.get("data", [])
+
+                if exercises:
+                    search = exercise_name.lower().strip()
+
+                    def score(ex):
+                        name = ex.get("name", "").lower()
+                        # Exact match = highest score
+                        if name == search:                    return 100
+                        # Search term fully inside result name
+                        if search in name:                    return 80
+                        # Result name fully inside search term
+                        if name in search:                    return 70
+                        # Count matching words
+                        s_words = set(search.split())
+                        n_words = set(name.split())
+                        common  = len(s_words & n_words)
+                        return common * 10
+
+                    matched = max(exercises, key=score)
+                    gif_url = matched.get("gifUrl", "")
+                    print(f"✅ Matched: '{matched.get('name')}' for '{search}' → {gif_url}")
+
+                    return {
+                        "gif_url":     gif_url,
+                        "instructions":matched.get("instructions", []),
+                        "target":      matched.get("targetMuscles",
+                                         [matched.get("target", "")]),
+                        "secondary":   matched.get("secondaryMuscles", []),
+                        "equipment":   matched.get("equipments",
+                                         [matched.get("equipment", "")]),
+                        "difficulty":  matched.get("difficulty", ""),
+                        "description": matched.get("description", ""),
+                        "body_part":   matched.get("bodyParts",
+                                         [matched.get("bodyPart", "")]),
+                    }
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    return {"gif_url": "", "instructions": [], "target": "", "equipment": ""}
+
+@router.get("/exercise-gif-image")
+async def proxy_gif(url: str):
+    """Proxy GIF to avoid CORS issues on Flutter Web"""
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, timeout=15.0, follow_redirects=True)
+            if res.status_code == 200:
+                return StreamingResponse(
+                    iter([res.content]),
+                    media_type="image/gif",
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+    except Exception as e:
+        print(f"❌ GIF proxy error: {e}")
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail="GIF not found")

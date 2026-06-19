@@ -4,8 +4,10 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiClient {
-  static const String baseUrl = 'http://localhost:8000';
-
+  static const String baseUrl = '192.168.1.15';
+  static const String rapidApiKey =
+      'a81359cf3dmsha7941111e8271a7p1b07f5jsn39ce879b3ea2';
+  static const String exerciseDbHost = 'exercisedb.p.rapidapi.com';
   // Use SharedPreferences instead of FlutterSecureStorage (works on web)
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -39,8 +41,11 @@ class ApiClient {
     return _handle(res);
   }
 
-  static Future<dynamic> post(String path, Map<String, dynamic> body,
-      {bool auth = true}) async {
+  static Future<dynamic> post(
+    String path,
+    Map<String, dynamic> body, {
+    bool auth = true,
+  }) async {
     final res = await http.post(
       Uri.parse('$baseUrl$path'),
       headers: await _headers(auth: auth),
@@ -53,9 +58,12 @@ class ApiClient {
     final res = await http.post(
       Uri.parse('$baseUrl$path'),
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-      body: body.entries.map((e) =>
-        '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}'
-      ).join('&'),
+      body: body.entries
+          .map(
+            (e) =>
+                '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}',
+          )
+          .join('&'),
     );
     return _handle(res);
   }
@@ -72,7 +80,38 @@ class ApiClient {
   static dynamic _handle(http.Response res) {
     final data = jsonDecode(res.body);
     if (res.statusCode >= 200 && res.statusCode < 300) return data;
-    throw ApiException(data['detail'] ?? 'Something went wrong', res.statusCode);
+    throw ApiException(
+      data['detail'] ?? 'Something went wrong',
+      res.statusCode,
+    );
+  }
+
+  static Future<Map<String, dynamic>?> fetchExerciseData(
+    String exerciseName,
+  ) async {
+    try {
+      final encoded = Uri.encodeComponent(exerciseName.toLowerCase().trim());
+      final res = await http.get(
+        Uri.parse('$baseUrl/workout/exercise-gif/$encoded'),
+        headers: await _headers(),
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final originalGifUrl = data['gif_url'] as String? ?? '';
+
+        // ✅ Rewrite GIF URL to go through our backend proxy
+        if (originalGifUrl.isNotEmpty) {
+          final proxiedUrl =
+              '$baseUrl/workout/exercise-gif-image?url='
+              '${Uri.encodeComponent(originalGifUrl)}';
+          data['gif_url'] = proxiedUrl;
+        }
+        return data;
+      }
+    } catch (e) {
+      print('❌ API client error: $e');
+    }
+    return null;
   }
 }
 

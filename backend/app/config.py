@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    
+    
+    RAPIDAPI_KEY: str = ""
 
     class Config:
         env_file = ".env"
